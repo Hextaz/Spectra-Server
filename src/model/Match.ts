@@ -17,6 +17,7 @@ import { ReplayLogging } from "../util/ReplayLogging";
 import { Maps } from "../util/ValorantInternalTranslator";
 import { MatchController } from "../controller/MatchController";
 import { DatabaseConnector } from "../connector/databaseConnector";
+import { WebsocketOutgoing } from "../connector/websocketOutgoing";
 import { IPlayerMMRInfo, ToolsData } from "./ToolsData";
 const Log = logging("Match");
 
@@ -37,7 +38,7 @@ export class Match {
   private wasTimeout: boolean = false;
   private spikeDetonationTime?: number = undefined;
 
-  private teams: Team[] = [];
+  public teams: Team[] = [];
   private map: string = "Loading";
   private spikeState: SpikeStates = { planted: false, detonated: false, defused: false };
   private attackersWon: boolean = false;
@@ -65,7 +66,7 @@ export class Match {
 
   private hasEnteredOvertime: boolean = false;
 
-  private tools: ToolsData;
+  public tools: ToolsData;
 
   // private ranks: { team1: string[]; team2: string[] } = { team1: [], team2: [] };
 
@@ -270,6 +271,7 @@ export class Match {
 
           case "game_end":
             this.isRunning = false;
+            this.roundPhase = "game_end";
 
             // Clean up timeout-related timers
             clearTimeout(this.timeoutEndTimeout);
@@ -286,7 +288,8 @@ export class Match {
             );
 
             this.eventNumber++;
-            MatchController.getInstance().removeMatch(this.groupCode);
+            WebsocketOutgoing.getInstance().sendMatchData(this.groupCode, this);
+            Log.info(`Game ended for match "${this.groupCode}", broadcasted final game_end state to overlays.`);
 
             if (this.isRegistered) {
               DatabaseConnector.completeMatch(this);

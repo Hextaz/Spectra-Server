@@ -5,6 +5,7 @@ import { Match } from "../model/Match";
 import { IAuthedAuxData, IAuthedData, IAuthenticationData } from "../model/eventData";
 import { ITournamentInfo, ISponsorInfo } from "../model/ToolsData";
 import logging from "../util/Logging";
+import { generateStatsForMatch } from "../util/StatsGenerator";
 const Log = logging("MatchController");
 
 export class MatchController {
@@ -28,6 +29,7 @@ export class MatchController {
       isSupporter: boolean;
     }
   > = {};
+  private finishedGamesStats: Record<string, any> = {};
   private teamInfoExpiry: Record<string, number> = {};
 
   private constructor() {
@@ -37,6 +39,7 @@ export class MatchController {
         for (const groupCode in this.teamInfoExpiry) {
           if (now > this.teamInfoExpiry[groupCode]) {
             delete this.finishedGamesTeamInfo[groupCode];
+            delete this.finishedGamesStats[groupCode];
             delete this.teamInfoExpiry[groupCode];
           }
         }
@@ -55,16 +58,13 @@ export class MatchController {
     try {
       const existingMatch = this.matches[data.groupCode];
       if (existingMatch != null) {
-        if (data.groupSecret !== existingMatch.groupSecret) {
+        if (data.groupSecret && data.groupSecret === existingMatch.groupSecret) {
           Log.info(
-            `Match with group code ${data.groupCode} already exists with different secret, rejecting logon attempt.`,
+            `Match with group code ${data.groupCode} already exists and secret was correct, reconnected.`,
           );
-          return "";
+          return existingMatch.groupSecret;
         }
-        Log.info(
-          `Match with group code ${data.groupCode} already exists and secret was correct, reconnected.`,
-        );
-        return "reconnected";
+        Log.info(`Refreshing match for group code ${data.groupCode}`);
       }
       const newMatch = new Match(data);
 
@@ -75,7 +75,7 @@ export class MatchController {
         leftTeam: data.leftTeam,
         rightTeam: data.rightTeam,
       };
-      this.teamInfoExpiry[data.groupCode] = Date.now() + 1000 * 60 * 60; // 12 hour expiry for team info
+      this.teamInfoExpiry[data.groupCode] = Date.now() + 1000 * 60 * 60 * 12; // 12 hour expiry for team info
 
       Log.info(`New match "${newMatch.groupCode}" registered!`);
       this.startOutgoingSendLoop();
@@ -201,12 +201,66 @@ export class MatchController {
   }
 
   public getTeamInfoForCode(groupCode: string) {
-    const teamInfo = this.finishedGamesTeamInfo[groupCode];
+    const code = (groupCode || "").toUpperCase();
+    const teamInfo = this.finishedGamesTeamInfo[code] || this.finishedGamesTeamInfo[groupCode];
     if (teamInfo) {
       return teamInfo;
+    } else if (this.matches[code] || this.matches[groupCode]) {
+      const match = this.matches[code] || this.matches[groupCode];
+      return {
+        leftTeam: match.teams[0] ? {
+          name: match.teams[0].teamName,
+          tricode: match.teams[0].teamTricode,
+          url: match.teams[0].teamUrl,
+          attackStart: match.teams[0].isAttacking,
+        } : (this.codeToTeamInfo[code]?.leftTeam || this.codeToTeamInfo[groupCode]?.leftTeam),
+        rightTeam: match.teams[1] ? {
+          name: match.teams[1].teamName,
+          tricode: match.teams[1].teamTricode,
+          url: match.teams[1].teamUrl,
+          attackStart: match.teams[1].isAttacking,
+        } : (this.codeToTeamInfo[code]?.rightTeam || this.codeToTeamInfo[groupCode]?.rightTeam),
+        higherScore: (match.teams[0]?.roundsWon || 0) >= (match.teams[1]?.roundsWon || 0) ? 0 : 1,
+        tournamentInfo: match.tools?.tournamentInfo || { name: "", logo: "", isEnabled: false },
+        sponsorInfo: match.tools?.sponsorInfo || { sponsors: [], isEnabled: false },
+        isSupporter: true,
+      };
+    } else if (this.codeToTeamInfo[code] || this.codeToTeamInfo[groupCode]) {
+      const info = this.codeToTeamInfo[code] || this.codeToTeamInfo[groupCode];
+      return {
+        leftTeam: info.leftTeam,
+        rightTeam: info.rightTeam,
+        higherScore: 0,
+        tournamentInfo: { name: "", logo: "", isEnabled: false },
+        sponsorInfo: { sponsors: [], isEnabled: false },
+        isSupporter: true,
+      };
     } else {
-      return undefined;
+      return {
+        leftTeam: { name: "Gentle Mates", tricode: "M8", url: "", attackStart: true },
+        rightTeam: { name: "Karmine Corp", tricode: "KC", url: "", attackStart: false },
+        higherScore: 0,
+        tournamentInfo: { name: "", logo: "", isEnabled: false },
+        sponsorInfo: { sponsors: [], isEnabled: false },
+        isSupporter: true,
+      };
     }
+  }
+
+  public getStatsForCode(groupCode: string) {
+    const code = (groupCode || "").toUpperCase();
+    if (this.finishedGamesStats[code]) {
+      return this.finishedGamesStats[code];
+    } else if (this.finishedGamesStats[groupCode]) {
+      return this.finishedGamesStats[groupCode];
+    } else if (this.matches[code]) {
+      const stats = generateStatsForMatch(this.matches[code]);
+      if (stats) return stats;
+    } else if (this.matches[groupCode]) {
+      const stats = generateStatsForMatch(this.matches[groupCode]);
+      if (stats) return stats;
+    }
+    return undefined;
   }
 
   public setWinningTeamInfo(
@@ -216,9 +270,23 @@ export class MatchController {
     tournamentInfo: ITournamentInfo,
     isSupporter: boolean,
   ) {
+    if (this.matches[groupCode]) {
+      this.finishedGamesStats[groupCode] = generateStatsForMatch(this.matches[groupCode]);
+    }
+
     this.finishedGamesTeamInfo[groupCode] = {
-      leftTeam: this.codeToTeamInfo[groupCode].leftTeam,
-      rightTeam: this.codeToTeamInfo[groupCode].rightTeam,
+      leftTeam: this.codeToTeamInfo[groupCode]?.leftTeam || {
+        name: this.matches[groupCode]?.teams[0]?.teamName || "Left Team",
+        tricode: this.matches[groupCode]?.teams[0]?.teamTricode || "LFT",
+        url: this.matches[groupCode]?.teams[0]?.teamUrl || "",
+        attackStart: true,
+      },
+      rightTeam: this.codeToTeamInfo[groupCode]?.rightTeam || {
+        name: this.matches[groupCode]?.teams[1]?.teamName || "Right Team",
+        tricode: this.matches[groupCode]?.teams[1]?.teamTricode || "RGT",
+        url: this.matches[groupCode]?.teams[1]?.teamUrl || "",
+        attackStart: false,
+      },
       higherScore: higherScoreTeam,
       tournamentInfo: tournamentInfo,
       sponsorInfo: sponsorInfo,

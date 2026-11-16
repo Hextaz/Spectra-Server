@@ -25,39 +25,39 @@ export class AvailableAuxiliary {
 }
 
 export class Player {
-  private name: string;
-  private tagline: string;
-  private riotId: string;
-  private searchName: string;
-  private fullName: string;
+  public name: string;
+  public tagline: string;
+  public riotId: string;
+  public searchName: string;
+  public fullName: string;
 
-  private position: number;
-  private locked: boolean = false;
-  private agentInternal: string = "";
-  private agentProper: ValueOf<Agents> = "";
+  public position: number;
+  public locked: boolean = false;
+  public agentInternal: string = "";
+  public agentProper: ValueOf<Agents> = "";
 
-  private isAlive: boolean = true;
-  private hasSpike: boolean = false;
-  private isObserved: boolean = false;
+  public isAlive: boolean = true;
+  public hasSpike: boolean = false;
+  public isObserved: boolean = false;
 
-  private health: number = 100;
-  private abilities: AvailableAbilities = new AvailableAbilities();
+  public health: number = 100;
+  public abilities: AvailableAbilities = new AvailableAbilities();
 
-  private kills: number = 0;
-  private deaths: number = 0;
-  private assists: number = 0;
-  private kdRatio: number = 0;
-  private killsThisRound: number = 0;
-  private deathsThisRound: number = 0;
-  private killedPlayerNames: string[] = [];
+  public kills: number = 0;
+  public deaths: number = 0;
+  public assists: number = 0;
+  public kdRatio: number = 0;
+  public killsThisRound: number = 0;
+  public deathsThisRound: number = 0;
+  public killedPlayerNames: string[] = [];
 
-  private currUltPoints: number = 0;
-  private maxUltPoints: number = 0;
-  private ultReady: boolean = false;
+  public currUltPoints: number = 0;
+  public maxUltPoints: number = 0;
+  public ultReady: boolean = false;
 
-  private money: number = 0;
-  private moneySpent: number = 0;
-  private spentMoneyThisRound: boolean = false;
+  public money: number = 0;
+  public moneySpent: number = 0;
+  public spentMoneyThisRound: boolean = false;
 
   private armorName: (typeof Armor)[number] = Armor[0];
   private highestWeapon: ValueOf<WeaponsAndAbilities> = WeaponsAndAbilities["unknown"];
@@ -79,6 +79,13 @@ export class Player {
   private auxiliaryAvailable: AvailableAuxiliary = new AvailableAuxiliary();
   private iconNameSuffix: string = "";
 
+  private setAgent(rawInternal: string) {
+    if (!rawInternal) return;
+    const clean = rawInternal.replace("_PC_C", "").trim();
+    this.agentInternal = clean;
+    this.agentProper = Agents[rawInternal as keyof typeof Agents] || Agents[clean as keyof typeof Agents] || clean;
+  }
+
   constructor(data: IFormattedRoster) {
     this.name = data.name;
     this.tagline = data.tagline;
@@ -86,16 +93,14 @@ export class Player {
     this.searchName = `${data.name} #${data.tagline}`;
     this.fullName = `${data.name}#${data.tagline}`;
     this.position = data.position;
-    this.agentInternal = data.agentInternal;
-    this.agentProper = Agents[data.agentInternal] || data.agentInternal;
+    this.setAgent(data.agentInternal);
     this.locked = data.locked;
   }
 
   public onRosterUpdate(data: IFormattedRoster) {
     this.name = data.name;
     this.tagline = data.tagline;
-    this.agentInternal = data.agentInternal;
-    this.agentProper = Agents[data.agentInternal] || data.agentInternal;
+    this.setAgent(data.agentInternal);
     this.locked = data.locked;
   }
 
@@ -121,8 +126,7 @@ export class Player {
     if (data.deaths > this.deaths) {
       this.deathsThisRound++;
     }
-    this.agentInternal = data.agentInternal;
-    this.agentProper = Agents[data.agentInternal] || data.agentInternal;
+    this.setAgent(data.agentInternal);
 
     this.runAgentSpecificScoreboardChecks(data);
 

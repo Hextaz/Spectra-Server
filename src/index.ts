@@ -10,6 +10,7 @@ import { createServer as createSecureServer } from "https";
 import { DatabaseConnector } from "./connector/databaseConnector";
 import { handleDiscordAuth, handlePackageRequest } from "./util/SupportService";
 const Log = logging("Status");
+// Initialized
 require("dotenv").config();
 
 const websocketIncoming = new WebsocketIncoming();
@@ -80,6 +81,29 @@ app.get("/getTeamInfoForCode", async (req, res) => {
       .status(404)
       .header("Access-Control-Allow-Origin", "*")
       .json({ error: "Group code not found" });
+  }
+});
+
+app.get("/getStats", async (req, res) => {
+  const code = (req.query.code || req.query.groupCode) as string;
+  if (!code || typeof code !== "string") {
+    res
+      .status(400)
+      .header("Access-Control-Allow-Origin", "*")
+      .json({ error: "Group code is required" });
+    return;
+  }
+  const stats = MatchController.getInstance().getStatsForCode(code.toUpperCase());
+  if (stats) {
+    res.status(200).header("Access-Control-Allow-Origin", "*").json({
+      status: 200,
+      data: stats,
+    });
+  } else {
+    res
+      .status(404)
+      .header("Access-Control-Allow-Origin", "*")
+      .json({ error: "Stats not found for code" });
   }
 });
 
