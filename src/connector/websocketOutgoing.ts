@@ -10,6 +10,8 @@ const Log = logging("WebsocketOutgoing");
 export class WebsocketOutgoing {
   private static instance: WebsocketOutgoing;
   wss: Server;
+  private mapbanSessions = new Set<string>();
+  private lastMapbanState = new Map<string, string>();
 
   public static getInstance(): WebsocketOutgoing {
     if (WebsocketOutgoing.instance == null) WebsocketOutgoing.instance = new WebsocketOutgoing();
@@ -59,6 +61,16 @@ export class WebsocketOutgoing {
       ws.once("logon", (msg: string) => {
         try {
           const json = JSON.parse(msg);
+          // Self-hosted mapban sessions: frontend /mapban?sessionId=<groupCode>
+          if (json.sessionId && !json.groupCode) {
+            const code = String(json.sessionId).toUpperCase();
+            ws.join(`mapban:${code}`);
+            this.mapbanSessions.add(code);
+            this.lastMapbanState.delete(code);
+            ws.emit("session_data", JSON.stringify(this.buildSessionData(code)));
+            Log.info(`Mapban session logon for code ${code}`);
+            return;
+          }
           ws.join(json.groupCode);
           ws.emit(
             "logon_success",
@@ -115,5 +127,67 @@ export class WebsocketOutgoing {
     }
 
     this.wss.to(groupCode).emit("match_data", JSON.stringify(deepMod));
+
+    // Push mapban session updates when the map pool changes
+    if (this.mapbanSessions.has(groupCode)) {
+      const mapInfoJson = JSON.stringify((data as any)?.tools?.mapInfo ?? []);
+      if (this.lastMapbanState.get(groupCode) !== mapInfoJson) {
+        this.lastMapbanState.set(groupCode, mapInfoJson);
+        this.wss
+          .to(`mapban:${groupCode}`)
+          .emit("session_data", JSON.stringify(this.buildSessionData(groupCode)));
+      }
+    }
+  }
+
+  private buildSessionData(groupCode: string) {
+    const mapPool = [
+      "Ascent", "Bind", "Breeze", "Fracture", "Haven", "Icebox",
+      "Lotus", "Pearl", "Split", "Sunset", "Abyss", "Corrode", "Summit",
+    ];
+    const availableMaps = mapPool.map((name) => ({ name }));
+    const match = MatchController.getInstance().getMatch(groupCode);
+    if (!match) {
+      return {
+        sessionIdentifier: groupCode,
+        organizationName: "Self-hosted",
+        isSupporter: true,
+        teams: [],
+        format: undefined,
+        availableMaps,
+        selectedMaps: [],
+        stage: "pick",
+        actingTeamCode: "",
+        actingTeam: 0,
+      };
+    }
+    const teams: any[] = match.teams || [];
+    const leftUrl: string = teams[0]?.teamUrl || "";
+    const rightUrl: string = teams[1]?.teamUrl || "";
+    const selectedMaps: any[] = [];
+    for (const info of (match.tools?.mapInfo || []) as any[]) {
+      if (info.type === "past" && info.map) {
+        selectedMaps.push({ name: info.map, score: [info.left?.score ?? 0, info.right?.score ?? 0] });
+      } else if (info.type === "future" && info.map) {
+        const pickedBy =
+          leftUrl && info.logo === leftUrl ? 0 : rightUrl && info.logo === rightUrl ? 1 : undefined;
+        selectedMaps.push({ name: info.map, pickedBy });
+      }
+    }
+    return {
+      sessionIdentifier: groupCode,
+      organizationName: "Self-hosted",
+      isSupporter: true,
+      teams: [
+        { name: teams[0]?.teamName || "Left", tricode: teams[0]?.teamTricode || "LFT", url: leftUrl },
+        { name: teams[1]?.teamName || "Right", tricode: teams[1]?.teamTricode || "RGT", url: rightUrl },
+      ],
+      format: undefined,
+      availableMaps,
+      selectedMaps,
+      stage: "pick",
+      actingTeamCode: teams[0]?.teamTricode || "LFT",
+      actingTeam: 0,
+    };
   }
 }

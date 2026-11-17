@@ -247,6 +247,10 @@ export class MatchController {
     }
   }
 
+  public getMatch(groupCode: string) {
+    return this.matches[groupCode] ?? this.matches[(groupCode || "").toUpperCase()];
+  }
+
   public getStatsForCode(groupCode: string) {
     const code = (groupCode || "").toUpperCase();
     if (this.finishedGamesStats[code]) {
